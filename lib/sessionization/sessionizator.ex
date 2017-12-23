@@ -40,33 +40,23 @@ defmodule Sessionization.Sessionizator do
     # # optimization: compile the pattern we use to split the data
     # line_break = :binary.compile_pattern("\n")
 
-    if True do
-      File.stream!("/home/electrofish/Projects/sessionizator/data/dataset-tiny.json", read_ahead: 1_000)
+    if true do
+      File.stream!("/home/electrofish/Projects/sessionizator/data/dataset-big.json", read_ahead: 1_000)
     else
       IO.stream(:stdio, :line)
     end
     |> Stream.map(&Poison.decode!(&1, as: %Event{}))
     |> Stream.each(&process_event/1)
-    # |> wait_60sec
-    # # |> Stream.into(File.stream!("new"))
     |> Stream.run
-
-    # Application.app_dir :sessionization
-    # |> Path.join("data/dataset-short.json")
-    # |> File.stream!(read_ahead: 1_000)
-    # |> Flow.from_enumerable()
-    # |> Flow.flat_map(&(String.split(&1, line_break) |> Poison.decode!))
-    # |> Flow.
   end
 
-  defp new_session?(ev = %Event
+  defp new_session?(%Event
     {
       timestamp: tm,
       event_type: ev_type,
-      user_id: u_id,
       content_id: cont_id
     },
-    last_tm
+    {_stored_u_id, stored_cont_id, %{last_tm: last_tm}}
   )
   do
     stored_cont_id != cont_id or ev_type == "stream_start" or tm - last_tm >= @timeout_sec
@@ -81,13 +71,12 @@ defmodule Sessionization.Sessionizator do
     }
   )
   do
-    with
-      [
-        record = {_u_id, stored_cont_id, ses_data = %{last_tm: last_tm}}
+    with [
+        record = {_u_id, _stored_cont_id, ses_data}
       ] <- :ets.lookup(@session_table, u_id)
     do
       cond do
-        new_session?(ev, last_tm) ->
+        new_session?(ev, record) ->
           # output the last session
           record_2_json(record)
           |> IO.puts
@@ -105,7 +94,7 @@ defmodule Sessionization.Sessionizator do
       end
 
     else
-      _no_res ->
+      _ ->
         if ev_type == "stream_end" do
           # output a new session on the immediate "stream_end" event
           record_2_json({u_id, cont_id, %{ev_count: 1, last_tm: tm}})
@@ -165,7 +154,7 @@ defmodule Sessionization.Sessionizator do
       "track_heartbeat" ->
         Map.update(ses_data, :track_playtm, @track_heartbeat_sec, &(&1 + @track_heartbeat_sec))
 
-      :otherwise ->
+      _ ->
         ses_data
     end
 
