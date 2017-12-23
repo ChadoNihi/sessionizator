@@ -1,26 +1,22 @@
-"""
-Assumptions & conventions:
-- valid JSON
-- "all the events always come on time and with monotonically increasing timestamp"
-- "Sessions can have multiple advertisements (ad_start, ad_end -pairs), multiple pauses (pause, play -pairs) and single track (start,heartbeats,end)"
-- no parallel sessions per user
-- the user can shut down "the session in any moment and then you cannot expect the end_ events to arrive ever"
-- sessions w/ paused tracks expire on 60 sec too
-- `ad_count` counts ads with no "ad_end" or "ad_start" events too
-- `session_start` correspond the "timestamp" of the first event received for a given "user_id"-"content_id" pair
-
-TODOs:
-- use @spec
-- tests
-- event type strings to atoms
-- better error handling
-- update to Elixir 1.6 and use its formatter
-"""
-
-
 defmodule Sessionization.Sessionizator do
   @moduledoc """
-  Documentation for Sessionization.
+    Assumptions & conventions:
+    - valid JSON
+    - "all the events always come on time and with monotonically increasing timestamp"
+    - "Sessions can have multiple advertisements (ad_start, ad_end -pairs), multiple pauses (pause, play -pairs) and single track (start,heartbeats,end)"
+    - no parallel sessions per user
+    - the user can shut down "the session in any moment and then you cannot expect the end_ events to arrive ever"
+    - sessions w/ paused tracks expire on 60 sec too
+    - `ad_count` counts ads with no "ad_end" or "ad_start" events too
+    - `session_start` correspond the "timestamp" of the first event received for a given "user_id"-"content_id" pair
+    - the "~ten" in "Every ~ten seconds of played track there will be heartbeat event" is assumed as exactly 10
+
+    TODOs:
+    - use @spec
+    - tests
+    - event type strings to atoms
+    - better error handling
+    - update to Elixir 1.6 and use its formatter
   """
 
   @doc """
@@ -34,8 +30,9 @@ defmodule Sessionization.Sessionizator do
   """
   alias Sessionization.Structures.Event
 
-  @session_table :acc_session
+  @session_table :ses_table
   @timeout_sec 60
+  @track_heartbeat_sec 10
 
   # def main([]), do: main([nil])
   def main(_args) do
@@ -64,43 +61,58 @@ defmodule Sessionization.Sessionizator do
 
   defp new_session?(ev = %Event
     {
-      user_id: u_id,
-      content_id: cont_id,
+      timestamp: tm,
       event_type: ev_type,
-      timestamp: tm
-    }
-  ) do
-    with
-      [{_u_id, stored_cont_id, %{last_tm: last_tm}}] <- :ets.lookup(@session_table, u_id)
-    do
-      stored_cont_id != cont_id or ev_type == "stream_start" or tm - last_tm >= @timeout_sec
-    else
-      _no_res -> true
-    end
+      user_id: u_id,
+      content_id: cont_id
+    },
+    last_tm
+  )
+  do
+    stored_cont_id != cont_id or ev_type == "stream_start" or tm - last_tm >= @timeout_sec
   end
 
   defp process_event(ev = %Event
     {
+      timestamp: tm,
+      event_type: ev_type,
       user_id: u_id,
-      content_id: cont_id,
-      event_type: ev_type
+      content_id: cont_id
     }
-  ) do
-    with [record = {_u_id, stored_cont_id, _ses_data}] <- :ets.lookup(@session_table, u_id)
+  )
+  do
+    with
+      [
+        record = {_u_id, stored_cont_id, ses_data = %{last_tm: last_tm}}
+      ] <- :ets.lookup(@session_table, u_id)
     do
       cond do
-        new_session?(ev) ->
+        new_session?(ev, last_tm) ->
+          # output the last session
           record_2_json(record)
           |> IO.puts
 
-          if ev_type == "stream_end", do: output(), else: record_event(ev, record)
+          if ev_type == "stream_end" do
+            # output a new session on the immediate "stream_end" event
+            record_2_json({u_id, cont_id, %{ev_count: 1, last_tm: tm}})
+            |> IO.puts
+          else
+            record_event(ev, ses_data)
+          end
 
-        true ->
-          record_event(ev, record)
+        :otherwise ->
+          record_event(ev, ses_data)
       end
 
     else
-      _no_res -> start_session(ev)
+      _no_res ->
+        if ev_type == "stream_end" do
+          # output a new session on the immediate "stream_end" event
+          record_2_json({u_id, cont_id, %{ev_count: 1, last_tm: tm}})
+          |> IO.puts
+        else
+          record_event(ev, %{})
+        end
     end
   end
 
@@ -129,15 +141,41 @@ defmodule Sessionization.Sessionizator do
 
   defp record_event(%Event
     {
+      timestamp: tm,
       event_type: ev_type,
-      timestamp: tm
+      user_id: u_id,
+      content_id: cont_id
     },
-    {u_id, stored_cont_id, ses_data}
-  ) do
+    ses_data
+  )
+  do
+    new_ses_data = case ev_type do
+      "stream_start" ->
+        %{
+          fst_tm: tm,
+          track_playtm: 0,
+          ad_count: 0
+        }
 
+      "ad_start" ->
+        %{ ses_data |
+          ad_count: Map.get(ses_data, :ad_count, 0) + 1
+        }
+
+      "track_heartbeat" ->
+        Map.update(ses_data, :track_playtm, @track_heartbeat_sec, &(&1 + @track_heartbeat_sec))
+
+      :otherwise ->
+        ses_data
+    end
+
+    :ets.insert(@session_table,
+      {
+        u_id,
+        cont_id,
+        Map.update(new_ses_data, :ev_count, 1, &(&1 + 1))
+        |> Map.put(:last_tm, tm)
+      }
+    )
   end
-
-  # defp process_event(%Event{event_type: "stream_end"}) do
-  #
-  # end
 end
