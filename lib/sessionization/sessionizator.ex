@@ -24,8 +24,8 @@ defmodule Sessionization.Sessionizator do
 
   ## Examples
 
-      iex> Sessionization.hello
-      :world
+      iex> Sessionization.main
+      nil
 
   """
   alias Sessionization.Structures.Event
@@ -45,6 +45,7 @@ defmodule Sessionization.Sessionizator do
     else
       IO.stream(:stdio, :line)
     end
+    # TODO: check for timeout sessions!
     |> Stream.map(&Poison.decode!(&1, as: %Event{}))
     |> Stream.each(&process_event/1)
     |> Stream.run
@@ -151,8 +152,17 @@ defmodule Sessionization.Sessionizator do
           ad_count: Map.get(ses_data, :ad_count, 0) + 1
         }
 
+      "track_start" ->
+        Map.put(ses_data, :tm_4_tract_last_heartbt_or_start, tm)
+
       "track_heartbeat" ->
-        Map.update(ses_data, :track_playtm, @track_heartbeat_sec, &(&1 + @track_heartbeat_sec))
+        Map.put(ses_data, :tm_4_tract_last_heartbt_or_start, tm)
+        |> Map.update(:track_playtm, @track_heartbeat_sec, &(&1 + @track_heartbeat_sec))
+
+      "pause" ->
+        sec_since_track_start_or_last_heartbt =
+          tm - Map.get(ses_data, :tm_4_tract_last_heartbt_or_start, tm)
+        Map.update(ses_data, :track_playtm, sec_since_track_start_or_last_heartbt, &(&1 + sec_since_track_start_or_last_heartbt))
 
       _ ->
         ses_data
