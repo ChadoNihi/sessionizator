@@ -17,6 +17,7 @@ defmodule Sessionization.Sessionizator do
     - event type strings to atoms
     - better error handling
     - update to Elixir 1.6 and use its formatter
+    - change @track_heartbt_sec to the actual avg "track_heartbeat" interval
   """
 
   @doc """
@@ -32,7 +33,8 @@ defmodule Sessionization.Sessionizator do
 
   @session_table :ses_table
   @timeout_sec 60
-  @track_heartbeat_sec 10
+  @track_heartbt_event_names ["track_hearbeat", "track_heartbeat"]
+  @track_heartbt_sec 10
 
   def main([]), do: main([nil])
   def main([path]) do
@@ -82,7 +84,7 @@ defmodule Sessionization.Sessionizator do
   )
   do
     with [
-        record = {_u_id, _stored_cont_id, ses_data}
+        record = {_stored_u_id, _stored_cont_id, ses_data}
       ] <- :ets.lookup(@session_table, u_id)
     do
       cond do
@@ -100,7 +102,18 @@ defmodule Sessionization.Sessionizator do
           end
 
         :otherwise ->
-          record_event(ev, ses_data)
+          if ev_type == "stream_end" do
+            record_2_json(
+              put_elem(record, 2,
+                %{ses_data | ev_count: ses_data[:ev_count] + 1, last_tm: tm}
+              )
+            )
+            |> IO.puts
+
+            :ets.delete(@session_table, u_id)
+          else
+            record_event(ev, ses_data)
+          end
       end
 
     else
@@ -157,16 +170,15 @@ defmodule Sessionization.Sessionizator do
         }
 
       "ad_start" ->
-        %{ ses_data |
-          ad_count: Map.get(ses_data, :ad_count, 0) + 1
-        }
+        Map.update(ses_data, :ad_count, 1, &(&1 + 1))
 
       "track_start" ->
-        Map.put(ses_data, :tm_4_tract_last_heartbt_or_start, tm)
+        Map.put_new(ses_data, :track_playtm, 0)
+        |> Map.put(:tm_4_tract_last_heartbt_or_start, tm)
 
-      "track_heartbeat" ->
+      ev_type when ev_type in @track_heartbt_event_names ->
         Map.put(ses_data, :tm_4_tract_last_heartbt_or_start, tm)
-        |> Map.update(:track_playtm, @track_heartbeat_sec, &(&1 + @track_heartbeat_sec))
+        |> Map.update(:track_playtm, @track_heartbt_sec, &(&1 + @track_heartbt_sec))
 
       "pause" ->
         sec_since_track_start_or_last_heartbt =
