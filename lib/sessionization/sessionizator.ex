@@ -26,7 +26,7 @@ defmodule Sessionization.Sessionizator do
   ## Examples
 
       iex> Sessionization.main
-      nil
+      :ok
 
   """
   alias Sessionization.Structures.Event
@@ -35,9 +35,28 @@ defmodule Sessionization.Sessionizator do
   @timeout_sec 60
   @track_heartbt_event_names ["track_hearbeat", "track_heartbeat"]
   @track_heartbt_sec 10
+  @possible_events_after_track_ended [
+    "ad_start", "ad_end", "stream_end"
+  ]
 
-  def main([]), do: main([nil])
-  def main([path]) do
+  def main(args) do
+    path =
+      case OptionParser.parse(args, switches: [file: :string], aliases: [f: :file]) do
+        {[file: path], _, _} ->
+          path
+        {[], [], _} ->
+          false
+        _ ->
+          IO.puts """
+          Usage:\n
+           <the_script_name> --file, -f\n\tfollowed by a path to a JSON-file with events\n
+           <the_script_name>\n\tto feed events line by line
+          """
+          # call System.halt(0) ONLY if your app is a script
+          # (see https://stackoverflow.com/a/28997461/4579279)
+          System.halt(0)
+      end
+
     :ets.new(@session_table, [:set, :named_table])
     # # optimization: compile the pattern we use to split the data
     # line_break = :binary.compile_pattern("\n")
@@ -60,7 +79,7 @@ defmodule Sessionization.Sessionizator do
     end)
     |> Stream.run
   end
-  def main(_), do: IO.puts "Give me a path to a JSON-file w/ events\nor feed me the events line by line."
+
 
   defp new_session?(%Event
     {
@@ -68,11 +87,15 @@ defmodule Sessionization.Sessionizator do
       event_type: ev_type,
       content_id: cont_id
     },
-    {_stored_u_id, stored_cont_id, %{last_tm: last_tm}}
+    {_stored_u_id, stored_cont_id, ses_data = %{last_tm: last_tm}}
   )
   do
-    stored_cont_id != cont_id or ev_type == "stream_start" or tm - last_tm >= @timeout_sec
+    stored_cont_id != cont_id
+    or ev_type == "stream_start"
+    or tm - last_tm >= @timeout_sec
+    or (Map.get(ses_data, :track_ended?, false) and ev_type not in @possible_events_after_track_ended)
   end
+
 
   defp process_event(ev = %Event
     {
@@ -128,6 +151,7 @@ defmodule Sessionization.Sessionizator do
     end
   end
 
+
   defp record_2_json({u_id, cont_id, ses_data}) do
     ses_start = Map.get(ses_data, :fst_tm, nil)
     ses_end = Map.get(ses_data, :last_tm, nil)
@@ -151,6 +175,7 @@ defmodule Sessionization.Sessionizator do
     )
   end
 
+
   defp record_event(%Event
     {
       timestamp: tm,
@@ -162,20 +187,6 @@ defmodule Sessionization.Sessionizator do
   )
   do
     new_ses_data = case ev_type do
-      "stream_start" ->
-        %{
-          fst_tm: tm,
-          track_playtm: 0,
-          ad_count: 0
-        }
-
-      "ad_start" ->
-        Map.update(ses_data, :ad_count, 1, &(&1 + 1))
-
-      "track_start" ->
-        Map.put_new(ses_data, :track_playtm, 0)
-        |> Map.put(:tm_4_tract_last_heartbt_or_start, tm)
-
       ev_type when ev_type in @track_heartbt_event_names ->
         Map.put(ses_data, :tm_4_tract_last_heartbt_or_start, tm)
         |> Map.update(:track_playtm, @track_heartbt_sec, &(&1 + @track_heartbt_sec))
@@ -184,6 +195,23 @@ defmodule Sessionization.Sessionizator do
         sec_since_track_start_or_last_heartbt =
           tm - Map.get(ses_data, :tm_4_tract_last_heartbt_or_start, tm)
         Map.update(ses_data, :track_playtm, sec_since_track_start_or_last_heartbt, &(&1 + sec_since_track_start_or_last_heartbt))
+
+      "ad_start" ->
+        Map.update(ses_data, :ad_count, 1, &(&1 + 1))
+
+      "stream_start" ->
+        %{
+          fst_tm: tm,
+          track_playtm: 0,
+          ad_count: 0
+        }
+
+      "track_start" ->
+        Map.put(ses_data, :track_playtm, 0)
+        |> Map.put(:tm_4_tract_last_heartbt_or_start, tm)
+
+      "track_end" ->
+        Map.put(ses_data, :track_ended?, true)
 
       _ ->
         ses_data
@@ -198,6 +226,7 @@ defmodule Sessionization.Sessionizator do
       }
     )
   end
+
 
   defp take_and_stream_timeouted_records(timeout_tm) do
     match_spec = [{

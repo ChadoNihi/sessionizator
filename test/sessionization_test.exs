@@ -3,6 +3,6 @@ defmodule SessionizationTest do
   doctest Sessionization
 
   test "greets the world" do
-    assert Sessionization.hello() == :world
+    assert Sessionization.Sessionizator.main() == :ok
   end
 end
