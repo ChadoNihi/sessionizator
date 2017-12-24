@@ -34,14 +34,14 @@ defmodule Sessionization.Sessionizator do
   @timeout_sec 60
   @track_heartbeat_sec 10
 
-  # def main([]), do: main([nil])
-  def main(_args) do
+  def main([]), do: main([nil])
+  def main([path]) do
     :ets.new(@session_table, [:named_table])
     # # optimization: compile the pattern we use to split the data
     # line_break = :binary.compile_pattern("\n")
 
-    if true do
-      File.stream!("/home/electrofish/Projects/sessionizator/data/dataset-big.json", read_ahead: 1_000)
+    if path do
+      File.stream!(path, read_ahead: 1_000)
     else
       IO.stream(:stdio, :line)
     end
@@ -50,6 +50,7 @@ defmodule Sessionization.Sessionizator do
     |> Stream.each(&process_event/1)
     |> Stream.run
   end
+  def main(_), do: IO.puts "Give me a path to a JSON-file w/ events\nor feed me the events line by line."
 
   defp new_session?(%Event
     {
