@@ -36,7 +36,7 @@ defmodule Sessionization.Sessionizator do
 
   def main([]), do: main([nil])
   def main([path]) do
-    :ets.new(@session_table, [:named_table])
+    :ets.new(@session_table, [:set, :named_table])
     # # optimization: compile the pattern we use to split the data
     # line_break = :binary.compile_pattern("\n")
 
@@ -45,9 +45,17 @@ defmodule Sessionization.Sessionizator do
     else
       IO.stream(:stdio, :line)
     end
-    # TODO: check for timeout sessions!
     |> Stream.map(&Poison.decode!(&1, as: %Event{}))
-    |> Stream.each(&process_event/1)
+    |> Stream.each(fn(ev = %Event{timestamp: tm}) ->
+      # process_event() comes first:
+      #   find_timeouted_records() assumes the event's user
+      #   (in particular the user's potential expired session) has been dealt with
+      process_event(ev)
+
+      take_and_stream_timeouted_records(tm-60)
+      |> Stream.each(&(record_2_json(&1) |> IO.puts))
+      |> Stream.run
+    end)
     |> Stream.run
   end
   def main(_), do: IO.puts "Give me a path to a JSON-file w/ events\nor feed me the events line by line."
@@ -79,12 +87,12 @@ defmodule Sessionization.Sessionizator do
     do
       cond do
         new_session?(ev, record) ->
-          # output the last session
+          # output the previous session
           record_2_json(record)
           |> IO.puts
 
           if ev_type == "stream_end" do
-            # output a new session on the immediate "stream_end" event
+            # immediately output the session that's got only the "stream_end" event
             record_2_json({u_id, cont_id, %{ev_count: 1, last_tm: tm}})
             |> IO.puts
           else
@@ -177,5 +185,24 @@ defmodule Sessionization.Sessionizator do
         |> Map.put(:last_tm, tm)
       }
     )
+  end
+
+  defp take_and_stream_timeouted_records(timeout_tm) do
+    match_spec = [{
+      {:_, :_, %{last_tm: :"$1"}},
+      [{:"=<", :"$1", timeout_tm}],
+      [:"$_"]
+    }]
+    Stream.resource(
+      fn -> :ets.select(@session_table, match_spec, 1_000) end,
+      fn
+        {records, continuation} ->
+          {[records], :ets.select(continuation)}
+        :"$end_of_table" ->
+          {:halt, nil}
+      end,
+      fn _ -> :ets.select_delete(@session_table, match_spec) end
+    )
+    |> Stream.concat
   end
 end
