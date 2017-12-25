@@ -215,7 +215,16 @@ defmodule Sessionization.Sessionizator do
         Map.update(ses_data, :track_playtm, sec_since_track_start_or_last_heartbt, &(&1 + sec_since_track_start_or_last_heartbt))
 
       "ad_start" ->
-        Map.update(ses_data, :ad_count, 1, &(&1 + 1))
+        Map.put(ses_data, :ad_started?, true)
+        |> Map.update(:ad_count, 1, &(&1 + 1))
+
+      "ad_end" ->
+        ad_started? = Map.pop(ses_data, :ad_started?, false)
+        unless ad_started? do
+          Map.update(ses_data, :ad_count, 1, &(&1 + 1))
+        else
+          ses_data
+        end
 
       "stream_start" ->
         %{
