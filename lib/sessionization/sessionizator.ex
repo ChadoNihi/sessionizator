@@ -21,23 +21,23 @@ defmodule Sessionization.Sessionizator do
   """
 
   @doc """
-  Hello world.
+  The sessionizator, processes events and outputs sessions.
 
   ## Examples
 
-      iex> Sessionization.main
+      iex> Sessionization.Sessionizator.main(["-f", "./sample_data/dataset_tiny.json"])
       :ok
 
   """
   alias Sessionization.Structures.Event
 
+  @possible_events_after_track_ended [
+    "ad_start", "ad_end", "stream_end"
+  ]
   @session_table :ses_table
   @timeout_sec 60
   @track_heartbt_event_names ["track_hearbeat", "track_heartbeat"]
   @track_heartbt_sec 10
-  @possible_events_after_track_ended [
-    "ad_start", "ad_end", "stream_end"
-  ]
 
   def main(args) do
     path =
@@ -97,57 +97,75 @@ defmodule Sessionization.Sessionizator do
   end
 
 
-  defp process_event(ev = %Event
+  def on_new_session(ev = %Event
     {
       timestamp: tm,
       event_type: ev_type,
       user_id: u_id,
       content_id: cont_id
+    },
+    record = {_stored_u_id, _stored_cont_id, ses_data}
+  )
+  do
+    unless Enum.empty?(ses_data) do
+      # i.e. we have the previous session to output
+      record_2_json(record)
+      |> IO.puts
+    end
+
+    if ev_type == "stream_end" do
+      # immediately output the session that's got only the "stream_end" event
+      record_2_json({u_id, cont_id, %{ev_count: 1, last_tm: tm}})
+      |> IO.puts
+    else
+      record_event(ev, ses_data)
+    end
+  end
+
+
+  def on_same_session(ev = %Event
+    {
+      timestamp: tm,
+      event_type: ev_type,
+      user_id: u_id
+    },
+    record = {_stored_u_id, _stored_cont_id, ses_data}
+  )
+  do
+    if ev_type == "stream_end" do
+      record_2_json(
+        put_elem(record, 2,
+          %{ses_data | ev_count: ses_data[:ev_count] + 1, last_tm: tm}
+        )
+      )
+      |> IO.puts
+
+      :ets.delete(@session_table, u_id)
+    else
+      record_event(ev, ses_data)
+    end
+  end
+
+
+  defp process_event(ev = %Event
+    {
+      user_id: u_id
     }
   )
   do
-    with [
-        record = {_stored_u_id, _stored_cont_id, ses_data}
-      ] <- :ets.lookup(@session_table, u_id)
+    with [record] <- :ets.lookup(@session_table, u_id)
     do
       cond do
         new_session?(ev, record) ->
-          # output the previous session
-          record_2_json(record)
-          |> IO.puts
-
-          if ev_type == "stream_end" do
-            # immediately output the session that's got only the "stream_end" event
-            record_2_json({u_id, cont_id, %{ev_count: 1, last_tm: tm}})
-            |> IO.puts
-          else
-            record_event(ev, ses_data)
-          end
+          on_new_session(ev, record)
 
         :otherwise ->
-          if ev_type == "stream_end" do
-            record_2_json(
-              put_elem(record, 2,
-                %{ses_data | ev_count: ses_data[:ev_count] + 1, last_tm: tm}
-              )
-            )
-            |> IO.puts
-
-            :ets.delete(@session_table, u_id)
-          else
-            record_event(ev, ses_data)
-          end
+          on_same_session(ev, record)
       end
 
     else
       _ ->
-        if ev_type == "stream_end" do
-          # output a new session on the immediate "stream_end" event
-          record_2_json({u_id, cont_id, %{ev_count: 1, last_tm: tm}})
-          |> IO.puts
-        else
-          record_event(ev, %{})
-        end
+        on_new_session(ev, {nil, nil, %{}})
     end
   end
 
