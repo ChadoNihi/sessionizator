@@ -58,8 +58,6 @@ defmodule Sessionization.Sessionizator do
       end
 
     :ets.new(@session_table, [:set, :named_table])
-    # # optimization: compile the pattern we use to split the data
-    # line_break = :binary.compile_pattern("\n")
 
     if path do
       File.stream!(path, read_ahead: 1_000)
@@ -69,8 +67,8 @@ defmodule Sessionization.Sessionizator do
     |> Stream.map(&Poison.decode!(&1, as: %Event{}))
     |> Stream.each(fn(ev = %Event{timestamp: tm}) ->
       # process_event() comes first:
-      #   find_timeouted_records() assumes the event's user
-      #   (in particular the user's potential expired session) has been dealt with
+      #   take_and_stream_timeouted_records() assumes the event's user
+      #   (in particular the user's potential expired session) has been already dealt with
       process_event(ev)
 
       take_and_stream_timeouted_records(tm-60)
@@ -90,10 +88,13 @@ defmodule Sessionization.Sessionizator do
     {_stored_u_id, stored_cont_id, ses_data = %{last_tm: last_tm}}
   )
   do
-    stored_cont_id != cont_id
-    or ev_type == "stream_start"
+    stored_cont_id !== cont_id
+    or ev_type === "stream_start"
     or tm - last_tm >= @timeout_sec
-    or (Map.get(ses_data, :track_ended?, false) and ev_type not in @possible_events_after_track_ended)
+    or (
+      (Map.get(ses_data, :track_ended?, false)
+      and ev_type not in @possible_events_after_track_ended)
+    )
   end
 
 
@@ -113,7 +114,7 @@ defmodule Sessionization.Sessionizator do
       |> IO.puts
     end
 
-    if ev_type == "stream_end" do
+    if ev_type === "stream_end" do
       # immediately output the session that's got only the "stream_end" event
       record_2_json({u_id, cont_id, %{ev_count: 1, last_tm: tm}})
       |> IO.puts
@@ -132,7 +133,7 @@ defmodule Sessionization.Sessionizator do
     record = {_stored_u_id, _stored_cont_id, ses_data}
   )
   do
-    if ev_type == "stream_end" do
+    if ev_type === "stream_end" do
       record_2_json(
         put_elem(record, 2,
           %{ses_data | ev_count: ses_data[:ev_count] + 1, last_tm: tm}
@@ -147,12 +148,7 @@ defmodule Sessionization.Sessionizator do
   end
 
 
-  defp process_event(ev = %Event
-    {
-      user_id: u_id
-    }
-  )
-  do
+  defp process_event(ev = %Event{user_id: u_id}) do
     with [record] <- :ets.lookup(@session_table, u_id)
     do
       cond do
@@ -261,6 +257,7 @@ defmodule Sessionization.Sessionizator do
       [{:"=<", :"$1", timeout_tm}],
       [:"$_"]
     }]
+    # stream timeouted sessions from ETS
     Stream.resource(
       fn -> :ets.select(@session_table, match_spec, 1_000) end,
       fn
@@ -269,8 +266,10 @@ defmodule Sessionization.Sessionizator do
         :"$end_of_table" ->
           {:halt, nil}
       end,
+      # cb to delete the sessions on done
       fn _ -> :ets.select_delete(@session_table, match_spec) end
     )
+    # flatten
     |> Stream.concat
   end
 end

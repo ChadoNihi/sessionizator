@@ -26,5 +26,7 @@ First, `cd sessionizator`. Then
 ### Build
 
 ```
-cd sessionizator && mix escript.build
+cd sessionizator
+mix deps.get
+mix escript.build
 ```
