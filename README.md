@@ -5,7 +5,7 @@ the main file - [lib/sessionization/sessionizator.ex](https://github.com/ChadoNi
 ## Requirements
 
 - Erlang 20 (the previous versions have not been tested)
-- [Elixir >= 1.5.x if you want to rebuild the script]
+- [Elixir >= 1.5.x if you want to rebuild the script or run the tests]
 
 ## Example Usage
 
@@ -29,4 +29,11 @@ First, `cd sessionizator`. Then
 cd sessionizator
 mix deps.get
 mix escript.build
+```
+
+### Test (TODO)
+
+```
+cd sessionizator
+mix test
 ```
