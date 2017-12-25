@@ -8,7 +8,7 @@ defmodule Sessionization.Mixfile do
       elixir: "~> 1.5",
       start_permanent: Mix.env == :prod,
       deps: deps(),
-      escript: [main_module: Sessionization.Sessionizator]
+      escript: [main_module: Sessionization.Sessionizator, name: "sessionize"]
     ]
   end
 

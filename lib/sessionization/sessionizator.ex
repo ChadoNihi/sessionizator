@@ -4,12 +4,12 @@ defmodule Sessionization.Sessionizator do
     - valid JSON
     - "all the events always come on time and with monotonically increasing timestamp"
     - "Sessions can have multiple advertisements (ad_start, ad_end -pairs), multiple pauses (pause, play -pairs) and single track (start,heartbeats,end)"
-    - no parallel sessions per user
+    - no parallel sessions per user: a new track means a new session for a given user
     - the user can shut down "the session in any moment and then you cannot expect the end_ events to arrive ever"
     - sessions w/ paused tracks expire on 60 sec too
     - `ad_count` counts ads with no "ad_end" or "ad_start" events too
-    - `session_start` correspond the "timestamp" of the first event received for a given "user_id"-"content_id" pair
-    - the "~ten" in "Every ~ten seconds of played track there will be heartbeat event" is assumed as exactly 10
+    - `session_start` corresponds to the "timestamp" of the first event of a new session
+    - the "~ten" in "Every ~ten seconds of played track there will be heartbeat event" is counted as exactly 10
 
     TODOs:
     - use @spec
@@ -44,7 +44,7 @@ defmodule Sessionization.Sessionizator do
       case OptionParser.parse(args, switches: [file: :string], aliases: [f: :file]) do
         {[file: path], _, _} ->
           path
-        {[], [], _} ->
+        {[], [], []} ->
           false
         _ ->
           IO.puts """

@@ -1,20 +1,24 @@
 # Sessionization
 
-**TODO: Add description**
+the main file - [lib/sessionization/sessionizator.ex](https://github.com/ChadoNihi/sessionizator/blob/master/lib/sessionization/sessionizator.ex)
 
-## Installation
+## Requirements
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `sessionizator` to your list of dependencies in `mix.exs`:
+- Erlang 20
+- [Elixir >= 1.5.x if you want to rebuild the script]
 
-```elixir
-def deps do
-  [
-    {:sessionization, "~> 0.1.0"}
-  ]
-end
-```
+## Example Usage
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at [https://hexdocs.pm/sessionizator](https://hexdocs.pm/sessionizator).
+First, `cd sessionizator`. Then
+
+`# read events from the file`
+`./sessionize -f "/home/electrofish/Projects/sessionizator/sample_data/dataset_tiny.json"`
+
+...or
+
+`# read events line by line from stdin`
+`./sessionize`
+
+### Build
+
+`cd sessionizator && mix escript.build`
