@@ -12,6 +12,8 @@ defmodule Sessionization.Sessionizator do
     - the "~ten" in "Every ~ten seconds of played track there will be heartbeat event" is counted as exactly 10
 
     TODOs:
+    - parallelize w/ GenServer or GenStage (Flow)
+    - optimize IO (some ideas can be found here - https://elixirforum.com/t/help-with-performance-file-io/802)
     - use @spec
     - tests
     - event type strings to atoms
@@ -57,21 +59,30 @@ defmodule Sessionization.Sessionizator do
           System.halt(0)
       end
 
-    :ets.new(@session_table, [:set, :named_table])
+    :ets.new(@session_table,
+      [
+        :set, :named_table,
+        # potential concurrency gains at some memory expenses (docs http://erlang.org/doc/man/ets.html#new-2)
+        {:write_concurrency,true}, {:read_concurrency,true}
+      ]
+    )
 
     if path do
-      File.stream!(path, read_ahead: 1_000)
+      File.stream!(path, [:raw, read_ahead: :math.pow(2, 22) |> round]) # read N bytes ahead
     else
       IO.stream(:stdio, :line)
     end
-    |> Stream.map(&Poison.decode!(&1, as: %Event{}))
-    |> Stream.each(fn(ev = %Event{timestamp: tm}) ->
+    |> Stream.each(fn(line) ->
+      ev = Poison.decode!(line, as: %Event{})
+
       # process_event() comes first:
       #   take_and_stream_timeouted_records() assumes the event's user
       #   (in particular the user's potential expired session) has been already dealt with
       process_event(ev)
 
-      take_and_stream_timeouted_records(tm-60)
+      # current performance killer.
+      # To substantially improve performance, run it once after the enclosing `each` if business logic permits
+      take_and_stream_timeouted_records(ev.timestamp - 60)
       |> Stream.each(&(record_2_json(&1) |> IO.puts))
       |> Stream.run
     end)
@@ -259,7 +270,7 @@ defmodule Sessionization.Sessionizator do
     }]
     # stream timeouted sessions from ETS
     Stream.resource(
-      fn -> :ets.select(@session_table, match_spec, 1_000) end,
+      fn -> :ets.select(@session_table, match_spec, 1_200) end,
       fn
         {records, continuation} ->
           {[records], :ets.select(continuation)}
