@@ -25,6 +25,8 @@ First, `cd sessionizator`. Then
 
 ### Build
 
+Set `MIX_ENV` to `prod` and then
+
 ```
 cd sessionizator
 mix deps.get
