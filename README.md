@@ -23,6 +23,8 @@ First, `cd sessionizator`. Then
 ./sessionize
 ```
 
+Too slow? Try `./sessionize-fast` instead.
+
 ### Build
 
 Set `MIX_ENV` to `prod` and then
