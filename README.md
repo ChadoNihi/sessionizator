@@ -1,3 +1,5 @@
+An interview home assignment.
+
 # Sessionization
 
 the main file - [lib/sessionization/sessionizator.ex](https://github.com/ChadoNihi/sessionizator/blob/master/lib/sessionization/sessionizator.ex)
